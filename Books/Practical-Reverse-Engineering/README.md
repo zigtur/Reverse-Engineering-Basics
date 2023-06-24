@@ -239,7 +239,72 @@ Here is an example with `REP` instruction:
 
 See [Data Movement - Exercise](Exercises/README.md#exercise)
 
-### Arithmetic Operations
+#### Arithmetic Operations
+Most of the supported arithmetic operations are straight forward. Here is a non-exhaustive list of instructions for arithmetic operations:
+- `add`: addition
+- `sub`: substraction
+- `inc`: increment (add one)
+- `dec`: decrement (sub one)
+- `or`: logic or, bit-level
+- `xor`: logic xor, bit-level
+- `and`: logic and, bit-level
+- `not`: logic not, bit-level
+- `shl`: shift left, bit-level
+- `shr`: shift right, bit-level
+- `rol`: rotate left
+- `ror`: rotate right
+
+`shr` and `shl` are frequently used to optimize multiplication and division, when it is possible (power of two).
+
+Multiplication is done with `mul` (unsigned) and `imul` (signed) instructions. The form of `mul` is `mul reg` or `mul mem`. Only one argument is used, because the other one is `EAX`, `AX` or `AL`. The result is respectively stored in `EAX:EDX`, `DX:AX`, or `AX`. For example:
+```assembly
+01: B8 03 00 00 00 mov eax,3                ; set EAX=3
+
+02: B9 22 22 22 22 mov ecx,22222222h        ; set ECX=0x22222222
+
+03: F7 E1 mul ecx                           ; EDX:EAX = 3 * 0x22222222 =
+                                            ; 0x66666666
+                                            ; hence, EDX=0, EAX=0x66666666
+
+04: B8 03 00 00 00 mov eax,3                ; set EAX=3
+
+05: B9 00 00 00 80 mov ecx,80000000h        ; set ECX=0x80000000
+
+06: F7 E1 mul ecx                           ; EDX:EAX = 3 * 0x80000000 =
+                                            ; 0x180000000
+                                            ; hence, EDX=1, EAX=0x80000000
+```
+The result can't always fit in one register, so it is stored in `EDX:EAX` for 32-bit multiplication.
+
+`imul` has three forms:
+- `imul reg/mem`: Same as `mul`
+- `imul reg1, reg2/mem`: reg1 = reg1 * reg2/mem
+- `imul reg1, reg2/mem, imm`: reg1 = reg2/mem * imm
+
+The same pattern does apply to `div` and `idiv`. Here is an example:
+```assembly
+01: F7 F1 div ecx                       ; EDX:EAX / ECX, quotient in EAX,
+
+02: F6 F1 div cl                        ; AX / CL, quotient in AL, remainder in AH
+
+03: F7 76 24 div dword ptr [esi+24h]    ; see line 1
+
+04: B1 02 mov cl,2                      ; set CL = 2
+
+05: B8 0A 00 00 00 mov eax,0Ah          ; set EAX = 0xA
+
+06: F6 F1 div cl                        ; AX/CL = A/2 = 5 in AL (quotient),
+                                        ; AH = 0 (remainder)
+
+07: B1 02 mov cl,2                      ; set CL = 2
+
+08: B8 09 00 00 00 mov eax,09h          ; set EAX = 0x9
+
+09: F6 F1 div cl                        ; AX/CL = 9/2 = 4 in AL (quotient),
+                                        ; AH = 1 (remainder)
+```
+
+#### Stack Operations and Function Invocation
 
 ## ARM
 
