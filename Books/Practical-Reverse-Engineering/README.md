@@ -308,6 +308,157 @@ The same pattern does apply to `div` and `idiv`. Here is an example:
 ```
 
 #### Stack Operations and Function Invocation
+##### PUSH and POP
+A stack is a contguous memory region pointed to by `ESP` and it grows downwards. `PUSH` and `POP` instructions implicitly modifies `ESP`. `PUSH` decrements `ESP` to allocate space, and then writes data to the allocated space. `POP` reads the data and then increments `ESP` to delete the allocated space. OS require the stack to be double-word aligned, so the increment/decrement value is 4 most of the time. Moreover, the `ESP` register can be manipulated with `ADD` and `SUB`.
+
+```assembly
+; initial ESP = 0xb20000
+01: B8 AA AA AA AA mov eax,0AAAAAAAAh
+02: BB BB BB BB BB mov ebx,0BBBBBBBBh
+03: B9 CC CC CC CC mov ecx,0CCCCCCCCh
+04: BA DD DD DD DD mov edx,0DDDDDDDDh
+05: 50 push eax
+; address 0xb1fffc will contain the value 0xAAAAAAAA and ESP
+; will be 0xb1fffc (=0xb20000-4)
+06: 53 push ebx
+; address 0xb1fff8 will contain the value 0xBBBBBBBB and ESP
+; will be 0xb1fff8 (=0xb1fffc-4)
+07: 5E pop esi
+; ESI will contain the value 0xBBBBBBBB and ESP will be 0xb1fffc
+; (=0xb1fff8+4)
+08: 5F pop edi
+; EDI will contain the value 0xAAAAAAAA and ESP will be 0xb20000
+; (=0xb1fffc+4)
+```
+
+##### CALL and RET
+The processor operates on concrete objects, such as registers and data from memory. A processor doesn't know the concept of functions, like they exist in the high-level programming languages. Functions are implemented through the stack. Each function has its own stack, with a `EBP` value and a `ESP` value.
+
+A function `int __cdecl addme(short a, short b)` can be shown like this:
+```assembly
+01: 004113A0 55 push ebp
+02: 004113A1 8B EC mov ebp, esp
+03: ...
+04: 004113BE 0F BF 45 08 movsx eax, word ptr [ebp+8]            ; first argument
+05: 004113C2 0F BF 4D 0C movsx ecx, word ptr [ebp+0Ch]          ; second argument
+06: 004113C6 03 C1 add eax, ecx
+07: ...
+08: 004113CB 8B E5 mov esp, ebp
+09: 004113CD 5D pop ebp
+10: 004113CE C3 retn
+```
+
+And it will be called this way:
+```assembly
+01: 004129F3 50 push eax
+02: ...
+03: 004129F8 51 push ecx
+04: 004129F9 E8 F1 E7 FF FF call addme
+05: 004129FE 83 C4 08 add esp, 8
+```
+
+In those two examples, there two interesting instructions:
+- `CALL` which does two operations
+    - It pushes the return address on the stack (address after the `CALL` instruction)
+    - It changes `EIP` (instruction pointer) to point to the beginning of the function code
+- `RET` pops the address stored on the top of the stack into `EIP`. It is equivalent to `POP EIP` (which does not exist on x86).
+
+```assembly
+; This code would set 0x12345678 into EIP
+01: 68 78 56 34 12 push 0x12345678
+02: C3 ret
+```
+
+To call a function, there exist multiple convention. It is a set of rules that define how the functions should be called. It can define how the parameters should be passed (on stack? in registers? both?), how return value should be passed, first parameter first or last, ... There exist some popular *calling conventions*, 3 of them are presented below.
+
+|  Conventions      |   Parameters        |    Return value         |  Non-volatile registers      |
+|-------------------|---------------------|-------------------------|------------------------------|
+| `CDECL`             | Pushed on stack, from right-to-left. Caller must clean up the stack after the call | Stored in EAX | EBP, ESP, EBX, ESI, EDI |
+| `STDCALL`           | Same as `CDECL`, except callee must clean the stack | Stored in EAX | EBP, ESP, EBX, ESI, EDI |
+| `FASTCALL`          | First two parameters in `ECX` and `EDX`. The rest on the stack. | Stored in EAX | EBP, ESP, EBX, ESI, EDI |
+
+The *function prologue* is a sequence of two instructions at the beginning of a function, and it establishes a new function frame. Here are the two instructions:
+```assembly
+01: 004113A0 55 push ebp            ; save old base stack pointer
+02: 004113A1 8B EC mov ebp, esp     ; set current stack pointer as the base stack pointer
+```
+
+The *function epilogue* is a sequence of two instructions at the end of a function, and it restores the previous function frame.
+
+##### Exercises
+1. Given what you learned about CALL and RET, explain how you would read
+the value of EIP? Why can’t you just do MOV EAX, EIP?
+> The solution would be to push it on stack, and then pop it.\
+> *Note: with x86-64, `lea rax, [rip]` works*
+```assembly
+push eip
+pop eax
+```
+2. Come up with at least two code sequences to set EIP to 0xAABBCCDD.
+> First solution
+```assembly
+push 0xAABBCCDD
+pop eip
+```
+> Second solution
+```
+call 0xAABBCCDD
+```
+3. In the example function, addme, what would happen if the stack pointer were not properly restored before executing RET?
+> If `EBP` was not removed and always on stack, then `RET` would set `EIP` value to `EBP`, and there will be a stack execution (if not protected).
+4. In all of the calling conventions explained, the return value is stored in a
+32-bit register (EAX). What happens when the return value does not fit in a
+32-bit register? Write a program to experiment and evaluate your answer.
+Does the mechanism change from compiler to compiler?
+> A pointer can be used for this. The pointer will then be used to access data.
+> Let's test it in x86-64, under Ubuntu.
+
+```c
+#include <stdio.h>
+
+const char* amazingString() {
+    return "An Amazing String";
+}
+
+int main()
+{
+    printf("%s has been returned\n", amazingString());
+}
+```
+
+The `amazingString()` function can be read as assembly with gdb. The C code has been compiled with **GCC**.
+```assembly
+; Dump of assembler code for function amazingString:
+=> 0x0000555555555149 <+0>:     endbr64 
+   0x000055555555514d <+4>:     push   rbp
+   0x000055555555514e <+5>:     mov    rbp,rsp
+   0x0000555555555151 <+8>:     lea    rax,[rip+0xeac]        # 0x555555556004
+   0x0000555555555158 <+15>:    pop    rbp
+   0x0000555555555159 <+16>:    ret
+```
+
+By using gdb, we can read the value pointed by the pointer:
+```
+(gdb) x /s 0x555555556004
+0x555555556004: "An Amazing String"
+```
+
+By using **Clang** compiler, the assembly code of amazingString is:
+```assembly
+Dump of assembler code for function amazingString:
+   0x0000000000401130 <+0>:     push   rbp
+   0x0000000000401131 <+1>:     mov    rbp,rsp
+=> 0x0000000000401134 <+4>:     movabs rax,0x402004
+   0x000000000040113e <+14>:    pop    rbp
+   0x000000000040113f <+15>:    ret  
+```
+We can see that the code is almost the same. The returned pointer points to the string:
+```
+(gdb) x /s 0x402004
+0x402004:       "An Amazing String"
+```
+
+
 
 ## ARM
 
