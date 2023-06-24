@@ -4,6 +4,9 @@ Contributions: Sébastien Josse
 
 This book is divided in 5 chapters:
 - [x86 and x64](#x86-and-x64)
+    - [Register set and Data types](#register-set-and-data-types)
+    - [Instruction set](#instruction-set)
+
 - ARM
 - Windows Kernel
 - Debugging and Automation
