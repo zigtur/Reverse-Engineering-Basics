@@ -459,6 +459,161 @@ We can see that the code is almost the same. The returned pointer points to the 
 ```
 
 
+#### Control flow
+Conditional execution is widely used with constructs like if/else, switch/case, and while/for loops. All those are implemented at low level through the `CMP`, `TEST`, `JMP` and `Jcc` instructions combined with the `EFLAGS` register. Note that `cc` is a Conditional Code, depending on flags from `EFLAGS`.
+
+Here are some common flags from `EFLAGS` register:
+- `ZF` - Zero Flag : Set if the result of previous arithmetic operation is zero
+- `SF` - Sign Flag : Most significant bit of the result
+- `CF` - Carry Flag : Set when result requires a carry (applies to unsigned numbers)
+- `OF` - Overflow Flag : Set if result overflow the max size (signed numbers)
+
+Here are some common Conditional Codes:
+|CONDITIONAL CODE   | ENGLISH DESCRIPTION                                               | MACHINE DESCRIPTION  |
+|-------------------|-------------------------------------------------------------------|----------------------|
+| B/NAE             | Below/Neither Above nor Equal. Used for unsigned operations.      | CF=1                 |
+| NB/AE             | Not Below/Above or Equal. Used for unsigned operations.           | CF=0                 |
+| E/Z               | Equal/Zero                                                        | ZF=1                 |
+| NE/NZ             | Not Equal/Not Zero                                                | ZF=0                 |
+| L                 | Less than/Neither Greater nor Equal. Used for signed operations.  | (SF ^ OF) = 1        |
+| GE/NL             | Greater or Equal/Not Less than. Used for signed operations.       | (SF ^ OF) = 0        |
+| G/NLE             | Greater/Not Less nor Equal. Used for signed operations.           | ((SF ^ OF) | ZF) = 0 |
+
+The `CMP` instruction compares two operands, and set the flags in `EFLAGS`. It uses a substraction between both elements. `TEST` does the same, but uses a logical AND between the two elements.
+
+##### If/Else
+It uses a compare, with a `Jcc`.
+Here is an example:
+```assembly
+01: mov esi, [ebp+8]
+02: mov edx, [esi]
+03: test edx, edx                   ; test
+04: jz short loc_4E31F9             ; jump if zero
+05: mov ecx, offset _FsRtlFastMutexLookasideList
+06: call _ExFreeToNPagedLookasideList@8
+07: and dword ptr [esi], 0
+08: lea eax, [esi+4]
+09: push eax
+10: call _FsRtlUninitializeBaseMcb@4
+11: loc_4E31F9:
+12: pop esi
+13: pop ebp
+14: retn 4
+15: _FsRtlUninitializeLargeMcb@4 endp
+```
+
+##### Switch/Case
+Switch-case uses multiple If/Else statements. This can be optimized by compilers.
+
+##### Loops
+Loops are implemented with `Jcc` and `JMP` instructions, and a If/Else statement.
+
+Here is an example:
+```assembly
+01: 00401002 mov edi, ds:__imp__printf
+02: 00401008 xor esi, esi
+03: 0040100A lea ebx, [ebx+0]
+04: 00401010 loc_401010:
+05: 00401010 push esi
+06: 00401011 push offset Format ; "%d\n"
+07: 00401016 call edi ; __imp__printf
+08: 00401018 inc esi
+09: 00401019 add esp, 8
+10: 0040101C cmp esi, 0Ah
+11: 0040101F jl short loc_401010
+12: 00401021 push offset aDone ; "done!\n"
+13: 00401026 call edi ; __imp__printf
+14: 00401028 add esp, 4
+```
+
+It corresponds to this C code:
+```c
+for (int i=0; i<10; i++) {
+ printf("%d\n", i);
+}
+printf("done!\n");
+```
+
+### System Mechanism
+
+#### Address Translation
+On a computer, the physical memory is divided into 4KB units named *pages*. There are *physical* and *virtual* addresses.
+
+Virtual addresses are used by instructions executed in the processor when paging is enabled.
+
+Physical addresses are the actual memory locations used by the processor when accessing memory. The **MMU** transparently translates every virtual address into a physical address before accessing it. A virtual address has a structure, which is read by the MMU. On x86 with PAE (Physical Address Extension) support, a virtual memory address can be divided into:
+- A Page Directory Pointer Table (PDPT)
+- A Page Directory (PD)
+- A Page Table (PT)
+- A Page Table Entry (PTE).
+
+A PDPT is an array of 4 elements, each pointing to a PD. A PD is an array of 512 elements, each pointing to a PT. A PT is an array of 512 elements containing a PTE.
+Each element we are talking about is 8-byte long, and it contains data about the tables, memory permission (rwx), and other characterisitics.
+
+Let's apply this to the virtual address `0xBF80EE6B`, which is `10111111 10000000 11101110 01101011` in binary format. This can be decoded as:
+- `10` --> Index into PDPT
+    - PDPT contains 4 elements, it is coded on 2 bits.
+- `111111 100` --> Index into PD
+- `00000 1110` --> Index into PT
+- `1110 01101011` --> Page offset
+
+The address translation process is made possible thanks to those three tables (PDPT, PD, PT) and the `CR3` register. This register holds the physical base address of the PDPT.
+
+The bottom 12 bits of a PDPT entry are flags/reserved bits. The remaining ones are used as the physical address of the PD base. Bit63 is the `NX` flag in PAE. 
+
+Let's take an example with `0xBF80EE6B`
+```
+kd> r @cr3 ; CR3 is the physical address for the base of a PDPT
+cr3=085c01e0
+kd> !dq @cr3+2*8 L1 ; read the PDPT entry at index 2 (reading at cr3 + 2)
+# 85c01f0 00000000`0d66e001 ; Returned element is 8-byte long as discussed previously
+; 00000000 0d66e001 = 00001101 01100110 11100000 00000001
+; cleaning the bottom 12 bits (flags/reserved bits)
+; 00000000 0d66e000 = 00001101 01100110 11100000 00000000
+; PD base is at physical address 0x0d66e000
+kd> !dq 0d66e000+0x1fc*8 L1 ; read the PD entry at index 0x1FC
+# d66efe0 00000000`0964b063
+```
+
+The documentation also says that the bottom 12 bits of a PD entry are flags/reserved.
+
+Let's continue our example
+```
+kd> !dq 0d66e000+0x1fc*8 L1 ; read the PD entry at index 0x1FC
+# d66efe0 00000000`0964b063
+; 0x0964b063 = 00001001 01100100 10110000 01100011
+; after clearing the bottom 12 bits
+; 0x0964b000 = 00001001 01100100 10110000 00000000
+; This tells us that the PT base is at 0x0964b000
+kd> !dq 0964b000+e*8 L1 ; read the PT entry at index 0xE
+# 964b070 00000000`06694021
+```
+
+The same pattern applis to Page Table (PT), the bottom 12 bits of a PT entry are flags/reserved and can be cleared to get a page entry.
+
+Let's finish our example
+```
+; 0x06694021 = 00000110 01101001 01000000 00100001
+; after clearing bottom 12 bits, we get
+; 0x06694000 = 00000110 01101001 01000000 00000000
+; This tells us that the page entry base is at 0x06694000
+; 0xe6b are the last 12 bits of 0xBF80EE6B
+kd> !db 06694000+e6b L8 ; read 8 bytes from the page entry at offset
+0xE6B
+# 6694e6b 8b ff 55 8b ec 83 ec 0c ..U.....[).t.... ; our data at that physical page
+kd> db bf80ee6b L8 ; read 8 bytes from the virtual address
+bf80ee6b 8b ff 55 8b ec 83 ec ..U.....[).t.... ; same data!
+```
+
+#### Interrupts and Exceptions
+Processor is typically connected to peripheral devices, through a data bus (PCI Express, ...). A device can require processor's attention, by causing an interrupt that will pause the processor to let it handle device's request. When processor receive an interrupt, it executes the function that is associated with this type of interruption. It then resumes its execution, going back to what he was doing before getting interrupted. Those are called *hardware interrupts*.
+
+For errors, there exist two types: *faults* and *traps*. A fault is correctable. A trap is caused by executing special kinds of instructions, like `SYSENTER`.
+
+Operating systems commonly implement system calls through the interrupt and exception mechanism.
+
+#### Walk-through
+
 
 ## ARM
 
