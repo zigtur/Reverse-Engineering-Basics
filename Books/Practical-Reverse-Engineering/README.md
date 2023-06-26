@@ -6,11 +6,13 @@ This book is divided in 5 chapters:
 - [x86 and x64](#x86-and-x64)
     - [Register set and Data types](#register-set-and-data-types)
     - [Instruction set](#instruction-set)
+    - [System Mechanism](#system-mechanism)
 
-- ARM
-- Windows Kernel
-- Debugging and Automation
-- Obfuscation
+
+- [ARM](#arm)
+- [Windows Kernel](#windows-kernel)
+- [Debugging and Automation](#debugging-and-automation)
+- [Obfuscation](#obfuscation)
 
 
 ## x86 and x64
