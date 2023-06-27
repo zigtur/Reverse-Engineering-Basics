@@ -616,6 +616,51 @@ Operating systems commonly implement system calls through the interrupt and exce
 
 #### Walk-through
 
+`SIDT` instruction writes the content of the IDT register to a 6-byte memory location. IDT is an array of 256 8-byte entries, each containing a pointer to an interrupt handler. When an interrupt or exception
+occurs, the processor uses the interrupt number as an index into the IDT and
+calls the entry’s specifi ed handler. IDT register is 6-byte, the first 4 bytes are the base of the IDT table and the other 2 bytes store the table limit.
+
+This assembly code:
+```assembly
+01: ; BOOL __stdcall DllMain(HINSTANCE hinstDLL, DWORD fdwReason,
+ ; LPVOID lpvReserved)
+02: _DllMain@12 proc near
+03: 55 push ebp
+04: 8B EC mov ebp, esp
+05: 81 EC 30 01 00+ sub esp, 130h
+06: 57 push edi
+07: 0F 01 4D F8 sidt fword ptr [ebp-8]
+08: 8B 45 FA mov eax, [ebp-6]
+09: 3D 00 F4 03 80 cmp eax, 8003F400h
+10: 76 10 jbe short loc_10001C88 (line 18)
+11: 3D 00 74 04 80 cmp eax, 80047400h
+12: 73 09 jnb short loc_10001C88 (line 18)
+13: 33 C0 xor eax, eax
+14: 5F pop edi
+15: 8B E5 mov esp, ebp
+16: 5D pop ebp
+17: C2 0C 00 retn 0Ch
+18: loc_10001C88:
+```
+can be decoded as this C code:
+```c
+typedef struct _IDTR {
+    DWORD base;
+    SHORT limit;
+} IDTR, *PIDTR;
+
+BOOL __stdcall DllMain (HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
+{
+    IDTR idtr;
+    __sidt(&idtr);
+    if (idtr.base > 0x8003F400 && idtr.base < 0x80047400h) { return FALSE; }
+    //line 18
+    ...
+}
+```
+
+#### Exercises
+An awesome resource: [bin.re](https://bin.re/projects/solutions-to-practical-reverse-engineering/)
 
 ## ARM
 
